@@ -1,0 +1,8 @@
+gymnasium>=0.29.0
+gymnasium[box2d]>=0.29.0
+numpy>=1.24.0
+torch>=2.0.0
+wandb>=0.15.0
+pdfplumber>=0.10.0
+matplotlib>=3.7.0
+opencv-python>=4.8.0
