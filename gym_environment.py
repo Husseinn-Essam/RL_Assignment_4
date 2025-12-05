@@ -365,7 +365,7 @@ def main():
     
     # Environment settings
     parser.add_argument('--env', type=str, default='LunarLander-v3',
-                        choices=['CartPole-v1', 'Acrobot-v1', 'MountainCar-v0', 'Pendulum-v1', 
+                        choices=[
                                 'LunarLander-v3', 'CarRacing-v3'],
                         help='Gymnasium environment')
     parser.add_argument('--algorithm', type=str, default='SAC',
