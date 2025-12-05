@@ -56,6 +56,25 @@ class CarRacingPreprocessor(gym.ObservationWrapper):
         return self.observation(obs), info
 
 
+class FrameSkip(gym.Wrapper):
+    """Skip frames to speed up training. Repeat action for n frames and return last observation."""
+    
+    def __init__(self, env, skip=4):
+        super().__init__(env)
+        self.skip = skip
+    
+    def step(self, action):
+        total_reward = 0.0
+        done = False
+        for _ in range(self.skip):
+            obs, reward, terminated, truncated, info = self.env.step(action)
+            total_reward += reward
+            done = terminated or truncated
+            if done:
+                break
+        return obs, total_reward, terminated, truncated, info
+
+
 def generate_run_name(algorithm, env_name, learning_rate, gamma, buffer_size, batch_size):
     """
     Generate a descriptive name for the run that includes key hyperparameters.
@@ -96,6 +115,8 @@ def create_environment(env_name, render_mode=None, video_folder=None, episode_tr
         env = gym.make(env_name, continuous=True, render_mode=render_mode if video_folder else None)
     elif env_name == 'CarRacing-v3':
         env = gym.make(env_name, continuous=True, render_mode=render_mode if video_folder else None)
+        # Apply frame skip to speed up training (4x faster)
+        env = FrameSkip(env, skip=4)
         # Apply preprocessing for image-based observation
         env = CarRacingPreprocessor(env)
     else:
@@ -376,7 +397,7 @@ def main():
     parser.add_argument('--num-episodes', '--num_episodes', type=int, default=1000, dest='num_episodes',
                         help='Number of training episodes')
     parser.add_argument('--max-steps', '--max_steps', type=int, default=1000, dest='max_steps',
-                        help='Maximum steps per episode')
+                        help='Maximum steps per episode (Note: CarRacing uses frame skip, so effective steps are 4x)')
     parser.add_argument('--num-tests', '--num_tests', type=int, default=100, dest='num_tests',
                         help='Number of test episodes')
     
@@ -461,6 +482,7 @@ def main():
         temp_env = gym.make(args.env, continuous=True)
     elif args.env == 'CarRacing-v3':
         temp_env = gym.make(args.env, continuous=True)
+        temp_env = FrameSkip(temp_env, skip=4)
         temp_env = CarRacingPreprocessor(temp_env)
     else:
         temp_env = gym.make(args.env)
@@ -499,6 +521,7 @@ def main():
                 temp_env = gym.make(args.env, continuous=True)
             elif args.env == 'CarRacing-v3':
                 temp_env = gym.make(args.env, continuous=True)
+                temp_env = FrameSkip(temp_env, skip=4)
                 temp_env = CarRacingPreprocessor(temp_env)
             else:
                 temp_env = gym.make(args.env)
