@@ -2,6 +2,7 @@
 Gymnasium Environment Runner for SAC, PPO, and TD3
 This script trains and tests SAC/PPO/TD3 agents on Gymnasium environments
 with Weights & Biases tracking, hyperparameter tuning, and video recording.
+Corrected for CarRacing-v3 action spaces.
 """
 
 import gymnasium as gym
@@ -34,6 +35,7 @@ class CarRacingPreprocessor(gym.ObservationWrapper):
         )
     
     def observation(self, obs):
+        # CarRacing-v3 returns frames as (H, W, 3)
         # Convert to grayscale and resize
         gray = cv2.cvtColor(obs, cv2.COLOR_RGB2GRAY)
         resized = cv2.resize(gray, (self.img_size, self.img_size), interpolation=cv2.INTER_AREA)
@@ -56,6 +58,29 @@ class CarRacingPreprocessor(gym.ObservationWrapper):
         return self.observation(obs), info
 
 
+class CarRacingActionWrapper(gym.ActionWrapper):
+    """
+    Rescale agent actions from [-1, 1] to the valid range for CarRacing-v3.
+    Agent outputs: [Steering, Gas, Brake] all in [-1, 1]
+    Environment expects:
+        Steering: [-1, 1]
+        Gas: [0, 1]
+        Brake: [0, 1]
+    """
+    def action(self, action):
+        # Steer: [-1, 1] -> [-1, 1] (No change)
+        steer = action[0]
+        
+        # Gas: [-1, 1] -> [0, 1]
+        # Map -1 to 0, and 1 to 1
+        gas = (action[1] + 1) / 2.0
+        
+        # Brake: [-1, 1] -> [0, 1]
+        brake = (action[2] + 1) / 2.0
+        
+        return np.array([steer, gas, brake])
+
+
 class FrameSkip(gym.Wrapper):
     """Skip frames to speed up training. Repeat action for n frames and return last observation."""
     
@@ -66,6 +91,12 @@ class FrameSkip(gym.Wrapper):
     def step(self, action):
         total_reward = 0.0
         done = False
+        # Initialize default return values
+        obs = None 
+        info = {}
+        terminated = False
+        truncated = False
+        
         for _ in range(self.skip):
             obs, reward, terminated, truncated, info = self.env.step(action)
             total_reward += reward
@@ -78,17 +109,6 @@ class FrameSkip(gym.Wrapper):
 def generate_run_name(algorithm, env_name, learning_rate, gamma, buffer_size, batch_size):
     """
     Generate a descriptive name for the run that includes key hyperparameters.
-    
-    Args:
-        algorithm: A2C, SAC, or PPO
-        env_name: Environment name
-        learning_rate: Learning rate
-        gamma: Discount factor
-        buffer_size: Replay buffer size (for SAC)
-        batch_size: Batch size
-    
-    Returns:
-        Formatted run name string
     """
     env_short = env_name.split('-')[0]  # e.g., CartPole from CartPole-v1
     return (f"{algorithm}_{env_short}_"
@@ -98,26 +118,24 @@ def generate_run_name(algorithm, env_name, learning_rate, gamma, buffer_size, ba
 
 def create_environment(env_name, render_mode=None, video_folder=None, episode_trigger=None, name_prefix=None):
     """
-    Create a Gymnasium environment with optional video recording.
-    
-    Args:
-        env_name: Name of the environment
-        render_mode: Render mode (None, 'rgb_array', 'human')
-        video_folder: Folder to save videos (None for no recording)
-        episode_trigger: Function to determine which episodes to record
-        name_prefix: Prefix for video file names
-    
-    Returns:
-        Gymnasium environment
+    Create a Gymnasium environment with optional video recording and specific wrappers.
     """
     # Handle continuous environments that require special parameters
     if env_name == 'LunarLander-v3':
         env = gym.make(env_name, continuous=True, render_mode=render_mode if video_folder else None)
     elif env_name == 'CarRacing-v3':
-        env = gym.make(env_name, continuous=True, render_mode=render_mode if video_folder else None)
-        # Apply frame skip to speed up training (4x faster)
+        # CarRacing always needs rgb_array mode since it returns pixel observations
+        # Use the provided render_mode or default to 'rgb_array'
+        car_render_mode = render_mode if render_mode else 'rgb_array'
+        env = gym.make(env_name, continuous=True, render_mode=car_render_mode)
+        
+        # 1. Apply frame skip to speed up training (4x faster)
         env = FrameSkip(env, skip=4)
-        # Apply preprocessing for image-based observation
+        
+        # 2. Apply Action Wrapper to fix the [-1, 1] vs [0, 1] mismatch
+        env = CarRacingActionWrapper(env)
+        
+        # 3. Apply preprocessing for image-based observation (Grayscale + Stack)
         env = CarRacingPreprocessor(env)
     else:
         env = gym.make(env_name, render_mode=render_mode if video_folder else None)
@@ -171,19 +189,6 @@ def train_agent(
 ):
     """
     Train the agent on the specified environment.
-    
-    Args:
-        agent: A2C, SAC, or PPO agent
-        env_name: Name of the Gymnasium environment
-        run_name: Name for this run (used for saving models)
-        num_episodes: Number of training episodes
-        max_steps: Maximum steps per episode
-        log_interval: Interval for logging to W&B
-        save_dir: Directory to save models
-        use_wandb: Whether to use Weights & Biases logging
-    
-    Returns:
-        Trained agent
     """
     env = create_environment(env_name)
     
@@ -207,24 +212,16 @@ def train_agent(
             # Select action
             action = agent.select_action(state)
             
-            # Handle continuous action spaces
-            if isinstance(action, np.ndarray):
-                env_action = action
-            else:
-                env_action = action
-            
             # Take action
-            next_state, reward, terminated, truncated, _ = env.step(env_action)
+            # Note: For CarRacing, the wrapper handles the conversion from [-1,1] to [0,1]
+            next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
             
             # Store transition - use 'terminated' NOT 'done' for the done flag
             # This is critical: truncated episodes (time limit) should NOT be treated as terminal
-            # For truncated episodes, we want to bootstrap from the value function
-            # Using 'done' here causes the "500 step cliff" bug where hitting max steps
-            # incorrectly signals zero future value to the critic
             agent.store_transition(state, action, reward, next_state, terminated)
             
-            # Train SAC every step for better sample efficiency
+            # Train SAC/TD3 every step for better sample efficiency
             # For A2C and PPO, train() will be called at end of episode
             if hasattr(agent, 'memory'):  # SAC/TD3 has replay buffer
                 loss = agent.train()
@@ -320,13 +317,8 @@ def test_agent(
         for step in range(max_steps):
             action = agent.select_action(state, epsilon=0.0)
             
-            # Handle continuous action spaces
-            if isinstance(action, np.ndarray):
-                env_action = action
-            else:
-                env_action = action
-            
-            next_state, reward, terminated, truncated, _ = env.step(env_action)
+            # The environment wrapper will handle the action scaling
+            next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
 
             episode_reward += reward
@@ -397,7 +389,7 @@ def main():
     parser.add_argument('--num-episodes', '--num_episodes', type=int, default=1000, dest='num_episodes',
                         help='Number of training episodes')
     parser.add_argument('--max-steps', '--max_steps', type=int, default=1000, dest='max_steps',
-                        help='Maximum steps per episode (Note: CarRacing uses frame skip, so effective steps are 4x)')
+                        help='Maximum steps per episode')
     parser.add_argument('--num-tests', '--num_tests', type=int, default=100, dest='num_tests',
                         help='Number of test episodes')
     
@@ -481,8 +473,10 @@ def main():
     if args.env == 'LunarLander-v3':
         temp_env = gym.make(args.env, continuous=True)
     elif args.env == 'CarRacing-v3':
+        # Apply wrappers here to get correct dimensions
         temp_env = gym.make(args.env, continuous=True)
         temp_env = FrameSkip(temp_env, skip=4)
+        temp_env = CarRacingActionWrapper(temp_env)
         temp_env = CarRacingPreprocessor(temp_env)
     else:
         temp_env = gym.make(args.env)
@@ -522,6 +516,7 @@ def main():
             elif args.env == 'CarRacing-v3':
                 temp_env = gym.make(args.env, continuous=True)
                 temp_env = FrameSkip(temp_env, skip=4)
+                temp_env = CarRacingActionWrapper(temp_env)
                 temp_env = CarRacingPreprocessor(temp_env)
             else:
                 temp_env = gym.make(args.env)
