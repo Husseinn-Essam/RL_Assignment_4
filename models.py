@@ -222,6 +222,7 @@ class SACAgent:
         discrete=True,
         use_cnn=False,
         input_channels=4,
+        reward_scale=1.0,
         **kwargs
     ):
         """
@@ -251,6 +252,7 @@ class SACAgent:
         self.device = device
         self.discrete = discrete
         self.use_cnn = use_cnn
+        self.reward_scale = reward_scale
         
         # Networks
         self.actor = ActorNetwork(state_size, action_size, hidden_sizes, discrete, use_cnn, input_channels).to(device)
@@ -309,7 +311,7 @@ class SACAgent:
     
     def store_transition(self, state, action, reward, next_state, done):
         """Store transition in replay buffer."""
-        self.memory.push(state, action, reward, next_state, done)
+        self.memory.push(state, action, reward * self.reward_scale, next_state, done)
         self.steps_done += 1
     
     def train(self):
@@ -799,6 +801,7 @@ class TD3Agent:
         exploration_noise=0.1,
         use_cnn=False,
         input_channels=4,
+        reward_scale=1.0,
         **kwargs
     ):
         """
@@ -830,6 +833,7 @@ class TD3Agent:
         self.policy_delay = policy_delay
         self.exploration_noise = exploration_noise
         self.use_cnn = use_cnn
+        self.reward_scale = reward_scale
         
         # Actor network (deterministic policy)
         self.actor = ActorNetwork(state_size, action_size, hidden_sizes, discrete=False, use_cnn=use_cnn, input_channels=input_channels).to(device)
@@ -890,7 +894,7 @@ class TD3Agent:
     
     def store_transition(self, state, action, reward, next_state, done):
         """Store transition in replay buffer."""
-        self.memory.push(state, action, reward, next_state, done)
+        self.memory.push(state, action, reward * self.reward_scale, next_state, done)
         self.steps_done += 1
     
     def train(self):
@@ -944,11 +948,13 @@ class TD3Agent:
         # Update critic 1
         self.critic1_optimizer.zero_grad()
         critic1_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.critic1.parameters(), 1.0)
         self.critic1_optimizer.step()
         
         # Update critic 2
         self.critic2_optimizer.zero_grad()
         critic2_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.critic2.parameters(), 1.0)
         self.critic2_optimizer.step()
         
         # Delayed policy updates

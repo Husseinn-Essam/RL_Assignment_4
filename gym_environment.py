@@ -72,11 +72,14 @@ class CarRacingActionWrapper(gym.ActionWrapper):
         steer = action[0]
         
         # Gas: [-1, 1] -> [0, 1]
-        # Map -1 to 0, and 1 to 1
+        # Map -1 to 0, and 1 to 1 (init 0 -> 0.5)
+        # This helps exploration by forcing the car to move initially
         gas = (action[1] + 1) / 2.0
         
         # Brake: [-1, 1] -> [0, 1]
-        brake = (action[2] + 1) / 2.0
+        # Map -1 to 0 (clip), and 1 to 1 (init 0 -> 0)
+        # This prevents the car from starting with brakes on
+        brake = np.clip(action[2], 0, 1)
         
         return np.array([steer, gas, brake])
 
@@ -427,7 +430,7 @@ def main():
     
     # PPO continuous action parameters
     parser.add_argument('--reward-scale', '--reward_scale', type=float, default=1.0, dest='reward_scale',
-                        help='Reward scaling factor for continuous control (PPO). Default: 1.0. Try 0.1 for large negative rewards.')
+                        help='Reward scaling factor (SAC/PPO/TD3). Default: 1.0. Try 0.1 for large negative rewards.')
     parser.add_argument('--action-scale', '--action_scale', type=float, default=1.0, dest='action_scale',
                         help='Action scaling factor for continuous control (PPO). Default: 1.0')
     
@@ -573,7 +576,8 @@ def main():
             device=args.device,
             discrete=is_discrete,
             use_cnn=use_cnn,
-            input_channels=input_channels
+            input_channels=input_channels,
+            reward_scale=args.reward_scale
         )
     elif args.algorithm == 'TD3':
         agent = TD3Agent(
@@ -591,7 +595,8 @@ def main():
             policy_delay=args.policy_delay,
             exploration_noise=args.exploration_noise,
             use_cnn=use_cnn,
-            input_channels=input_channels
+            input_channels=input_channels,
+            reward_scale=args.reward_scale
         )
     else:  # PPO
         agent = PPOAgent(
