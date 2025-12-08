@@ -72,29 +72,16 @@ class CarRacingActionWrapper(gym.ActionWrapper):
         steer = action[0]
         
         # Gas: [-1, 1] -> [0, 1]
-        # Map -1 to 0, and 1 to 1
+        # Map -1 to 0, and 1 to 1 (init 0 -> 0.5)
+        # This helps exploration by forcing the car to move initially
         gas = (action[1] + 1) / 2.0
         
         # Brake: [-1, 1] -> [0, 1]
-        # Map -1 to 0, and 1 to 1 (same linear transformation as gas)
-        brake = (action[2] + 1) / 2.0
+        # Map -1 to 0 (clip), and 1 to 1 (init 0 -> 0)
+        # This prevents the car from starting with brakes on
+        brake = np.clip(action[2], 0, 1)
         
         return np.array([steer, gas, brake])
-
-
-class RewardClipper(gym.Wrapper):
-    """Clip rewards to stabilize training."""
-    
-    def __init__(self, env, min_reward=-10, max_reward=10):
-        super().__init__(env)
-        self.min_reward = min_reward
-        self.max_reward = max_reward
-    
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        # Clip large negative/positive rewards
-        reward = np.clip(reward, self.min_reward, self.max_reward)
-        return obs, reward, terminated, truncated, info
 
 
 class FrameSkip(gym.Wrapper):
@@ -148,13 +135,10 @@ def create_environment(env_name, render_mode=None, video_folder=None, episode_tr
         # 1. Apply frame skip to speed up training (4x faster)
         env = FrameSkip(env, skip=4)
         
-        # 2. Apply reward clipping to stabilize training
-        env = RewardClipper(env, min_reward=-10, max_reward=10)
-        
-        # 3. Apply Action Wrapper to fix the [-1, 1] vs [0, 1] mismatch
+        # 2. Apply Action Wrapper to fix the [-1, 1] vs [0, 1] mismatch
         env = CarRacingActionWrapper(env)
         
-        # 4. Apply preprocessing for image-based observation (Grayscale + Stack)
+        # 3. Apply preprocessing for image-based observation (Grayscale + Stack)
         env = CarRacingPreprocessor(env)
     else:
         env = gym.make(env_name, render_mode=render_mode if video_folder else None)
@@ -437,8 +421,8 @@ def main():
     # PPO entropy regularization
     parser.add_argument('--entropy-coef', '--entropy_coef', type=float, default=0.01, dest='entropy_coef',
                         help='Initial entropy coefficient for exploration bonus (PPO)')
-    parser.add_argument('--entropy-decay', '--entropy_decay', type=float, default=0.8, dest='entropy_decay',
-                        help='Fraction of training episodes (0-1) over which to linearly decay entropy to zero (PPO). Default: 0.8 (first 80%%). Use 0.7-0.9 for continuous control.')
+    parser.add_argument('--entropy-decay', '--entropy_decay', type=float, default=0.5, dest='entropy_decay',
+                        help='Fraction of training episodes (0-1) over which to linearly decay entropy to zero (PPO). Default: 0.5 (first 50%%)')
     
     # PPO gradient clipping
     parser.add_argument('--max-grad-norm', '--max_grad_norm', type=float, default=0.5, dest='max_grad_norm',
