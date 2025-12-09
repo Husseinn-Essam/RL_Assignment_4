@@ -340,6 +340,10 @@ def main():
     parser.add_argument('--gae-lambda', type=float, default=0.95)
     parser.add_argument('--entropy-coef', type=float, default=0.01)
     parser.add_argument('--entropy-decay', type=float, default=0.5)
+    parser.add_argument('--epsilon-clip', type=float, default=0.2,
+                        help='PPO clipping epsilon for policy updates')
+    parser.add_argument('--max-grad-norm', type=float, default=0.5,
+                        help='Max gradient norm for PPO gradient clipping')
     parser.add_argument('--device', type=str, default='cuda' if __import__('torch').cuda.is_available() else 'cpu')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--no-wandb', action='store_true')
@@ -420,15 +424,15 @@ def main():
             learning_rate=args.learning_rate,
             gamma=args.gamma,
             gae_lambda=args.gae_lambda,
-            epsilon_clip=0.2,
+            epsilon_clip=args.epsilon_clip,
             epochs=args.ppo_epochs,
-            batch_size=64,
+            batch_size=args.batch_size,
             hidden_sizes=args.hidden_sizes,
             device=args.device,
             discrete=is_discrete,
             entropy_coef=args.entropy_coef,
             entropy_decay_episodes=entropy_decay_episodes,
-            max_grad_norm=0.5,
+            max_grad_norm=args.max_grad_norm,
             action_scale=1.0,
             reward_scale=0.1,
             use_cnn=use_cnn,
