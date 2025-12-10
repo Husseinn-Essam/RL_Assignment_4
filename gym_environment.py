@@ -451,6 +451,11 @@ def main():
     
     args = parser.parse_args()
     
+    # Change device to cpu if cuda not available
+    if args.device == 'cuda' and not torch.cuda.is_available():
+        print("CUDA not available, switching to CPU")
+        args.device = 'cpu'
+    
     # Set random seeds
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
