@@ -112,6 +112,28 @@ def generate_run_name(algorithm, env_name, learning_rate, gamma, buffer_size, ba
             f"buf{buffer_size//1000}k_bs{batch_size}")
 
 
+def _get_base_env(env):
+    """Unwrap wrappers to get the base environment (has metadata)."""
+    base = env
+    # Unwrap common wrapper chain
+    while hasattr(base, 'env'):
+        base = base.env
+    return base
+
+def _detect_frame_skip(env):
+    """Traverse wrapper chain to find a FrameSkip-like wrapper and return its skip value (default 1)."""
+    cur = env
+    while True:
+        if hasattr(cur, 'skip'):
+            try:
+                return int(cur.skip)
+            except Exception:
+                return 1
+        if not hasattr(cur, 'env'):
+            break
+        cur = cur.env
+    return 1
+
 def create_environment(env_name, render_mode=None, video_folder=None, episode_trigger=None, name_prefix=None):
     """
     Create a Gymnasium environment with optional video recording and specific wrappers.
@@ -137,6 +159,15 @@ def create_environment(env_name, render_mode=None, video_folder=None, episode_tr
         env = gym.make(env_name, render_mode=render_mode if video_folder else None)
     
     if video_folder:
+        # If we have wrapped the env with FrameSkip (or similar), adjust the base env's render_fps
+        # so that the video writer uses a lower fps matching the effective frame rate of recorded frames.
+        base_env = _get_base_env(env)
+        skip = _detect_frame_skip(env)
+        orig_fps = base_env.metadata.get('render_fps', 30)
+        # Divide fps by skip so recorded fps matches produced frames (avoid sped-up video).
+        adjusted_fps = max(1, int(orig_fps // max(1, skip)))
+        base_env.metadata['render_fps'] = adjusted_fps
+
         if name_prefix is None:
             name_prefix = f"{env_name}-rl-video"
         env = RecordVideo(
