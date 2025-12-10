@@ -9,7 +9,7 @@ parameters:
   
   # Algorithm selection - all three in one sweep
   algorithm:
-    values: ['PPO', 'TD3', 'SAC']
+    values: ['PPO']
   
   # Common parameters for all algorithms
   # Note: actual episodes used will be: PPO=2000, TD3=1000, SAC=300
