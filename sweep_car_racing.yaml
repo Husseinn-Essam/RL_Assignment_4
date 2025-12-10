@@ -12,7 +12,7 @@ parameters:
     value: 'PPO'
   
   # Number of episodes for training
-  num_episodes:
+  num-episodes:
     value: 300
   
   # Number of test episodes
