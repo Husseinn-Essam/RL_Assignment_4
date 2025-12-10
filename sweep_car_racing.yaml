@@ -13,7 +13,7 @@ parameters:
   
   # Number of episodes for training
   num_episodes:
-    value: 300
+    value: 1000
   
   # Number of test episodes
   num-tests:

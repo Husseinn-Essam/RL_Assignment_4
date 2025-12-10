@@ -9,7 +9,7 @@ import os
 
 # Algorithm-specific episode counts
 EPISODE_MAPPING = {
-    'PPO': 300,
+    'PPO': 1000,
 }
 
 def main():
