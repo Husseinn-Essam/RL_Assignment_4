@@ -201,9 +201,16 @@ def train_agent(
             done = terminated or truncated
             
             agent.store_transition(state, action, reward, next_state, terminated)
-            
-            # Start training only after we have enough data
-            if hasattr(agent, 'memory') and len(agent.memory) > start_steps:
+
+            # Start training only after we have enough data.
+            # Off-policy agents use a replay `memory`; on-policy agents (PPO)
+            # do not have `memory` so train after the warmup `start_steps`.
+            if hasattr(agent, 'memory'):
+                ready_to_train = len(agent.memory) > start_steps
+            else:
+                ready_to_train = global_step_count > start_steps
+
+            if ready_to_train:
                 loss = agent.train()
                 if loss is not None:
                     episode_loss.append(loss)
