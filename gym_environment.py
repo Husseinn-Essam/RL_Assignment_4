@@ -11,6 +11,7 @@ import argparse
 from datetime import datetime
 from gymnasium.wrappers import RecordVideo
 import cv2
+import wandb
 
 from models import SACAgent, PPOAgent, TD3Agent
 
@@ -226,11 +227,27 @@ def train_agent(
         avg_loss = float(np.mean(episode_loss)) if episode_loss else 0.0
         episode_losses.append(avg_loss)
 
+        # Log to wandb if enabled
+        if use_wandb:
+            entropy_or_alpha = agent.get_entropy_coef() if hasattr(agent, 'get_entropy_coef') else 0.0
+            wandb.log({
+                'episode': episode + 1,
+                'episode_reward': episode_reward,
+                'episode_loss': avg_loss,
+                'entropy_or_alpha': entropy_or_alpha
+            })
+
         if (episode + 1) % log_interval == 0:
             avg_reward = float(np.mean(episode_rewards[-log_interval:]))
             avg_loss = float(np.mean(episode_losses[-log_interval:]))
             entropy_or_alpha = agent.get_entropy_coef() if hasattr(agent, 'get_entropy_coef') else 0.0
             print(f"Episode {episode + 1}/{num_episodes} - Avg Reward: {avg_reward:.2f}, Avg Loss: {avg_loss:.4f}, Entropy/Alpha: {entropy_or_alpha:.4f}")
+            
+            if use_wandb:
+                wandb.log({
+                    'avg_reward': avg_reward,
+                    'avg_loss': avg_loss,
+                })
 
         # Optionally save intermediate checkpoints
         if (episode + 1) % (log_interval * 5) == 0:
@@ -318,6 +335,17 @@ def test_agent(
     print(f"Mean Reward: {results['mean_reward']:.2f} ± {results['std_reward']:.2f}")
     print(f"Mean Duration: {results['mean_duration']:.2f} ± {results['std_duration']:.2f}")
     print(f"Reward Range: [{results['min_reward']:.2f}, {results['max_reward']:.2f}]")
+    
+    # Log test results to wandb
+    if use_wandb:
+        wandb.log({
+            'test_mean_reward': results['mean_reward'],
+            'test_std_reward': results['std_reward'],
+            'test_mean_duration': results['mean_duration'],
+            'test_std_duration': results['std_duration'],
+            'test_min_reward': results['min_reward'],
+            'test_max_reward': results['max_reward']
+        })
     print("=" * 50 + "\n")
 
     return results
