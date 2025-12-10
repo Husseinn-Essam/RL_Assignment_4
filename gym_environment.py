@@ -455,6 +455,8 @@ def main():
     if args.device == 'cuda' and not torch.cuda.is_available():
         print("CUDA not available, switching to CPU")
         args.device = 'cpu'
+    else:
+        print(f"Using device: {args.device}")
     
     # Set random seeds
     torch.manual_seed(args.seed)
