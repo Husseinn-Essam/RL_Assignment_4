@@ -36,6 +36,7 @@ class TD3Agent:
         use_cnn=False,
         input_channels=4,
         reward_scale=1.0,
+        start_steps=10000,
         **kwargs
     ):
         """
@@ -117,22 +118,26 @@ class TD3Agent:
         Returns:
             Selected action with exploration noise
         """
+        # If we're still in the initial random collection phase, return random actions
+        if hasattr(self, 'start_steps') and self.steps_done < self.start_steps:
+            return np.random.uniform(-1.0, 1.0, size=self.action_size)
+
         if self.use_cnn:
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device) / 255.0
         else:
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-        
+
         with torch.no_grad():
             # TD3 uses deterministic policy (only mean, no log_std)
             mean, _ = self.actor(state_tensor)
             action = mean.cpu().numpy()[0]
-            
+
             # Add exploration noise during training
             if epsilon is None or epsilon > 0:
                 noise = np.random.normal(0, self.exploration_noise, size=self.action_size)
                 action = action + noise
                 action = np.clip(action, -1.0, 1.0)
-            
+
             return action
     
     def store_transition(self, state, action, reward, next_state, done):

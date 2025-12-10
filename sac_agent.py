@@ -31,6 +31,7 @@ class SACAgent:
         use_cnn=False,
         input_channels=4,
         reward_scale=1.0,
+        start_steps=10000,
         **kwargs
     ):
         """
@@ -60,6 +61,7 @@ class SACAgent:
         self.device = device
         self.use_cnn = use_cnn
         self.reward_scale = reward_scale
+        self.start_steps = start_steps
         
         # Networks
         self.actor = ActorNetwork(state_size, action_size, hidden_sizes, use_cnn, input_channels).to(device)
@@ -96,12 +98,16 @@ class SACAgent:
         Returns:
             Selected action
         """
+        # If we're still collecting random steps, return random actions
+        if hasattr(self, 'start_steps') and self.steps_done < self.start_steps:
+            return np.random.uniform(-1.0, 1.0, size=self.action_size)
+
         if self.use_cnn:
             # For CNN, state should be [C, H, W], add batch dimension to make [1, C, H, W]
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device) / 255.0
         else:
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-        
+
         with torch.no_grad():
             mean, log_std = self.actor(state_tensor)
             std = log_std.exp()

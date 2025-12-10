@@ -177,6 +177,7 @@ def train_agent(
     episode_rewards = []
     episode_losses = []
     global_step_count = 0  # Track total steps across episodes
+    training_started = False
     
     for episode in range(num_episodes):
         state, _ = env.reset()
@@ -212,6 +213,13 @@ def train_agent(
 
             if ready_to_train:
                 loss = agent.train()
+                # Print a one-time message when training begins after warmup
+                if not training_started:
+                    if hasattr(agent, 'start_steps'):
+                        print(f"Training started after {global_step_count} steps (start_steps={agent.start_steps})")
+                    else:
+                        print(f"Training started after {global_step_count} steps (start_steps={start_steps})")
+                    training_started = True
                 if loss is not None:
                     episode_loss.append(loss)
             
@@ -412,6 +420,8 @@ def main():
                         help='TD3 delayed policy update frequency')
     parser.add_argument('--exploration-noise', '--exploration_noise', type=float, default=0.1, dest='exploration_noise',
                         help='TD3 exploration noise std')
+    parser.add_argument('--start-steps', '--start_steps', type=int, default=10000, dest='start_steps',
+                        help='Number of initial random steps to collect before training begins for off-policy agents')
     
     # PER parameters
     parser.add_argument('--use-per', action='store_true', dest='use_per',
@@ -526,9 +536,9 @@ def main():
     print(f"Prioritized Replay: {args.use_per} "
           + (f"(alpha={args.per_alpha}, eps={args.per_eps}, beta={args.per_beta})" if args.use_per else ""))
     if args.algorithm == 'SAC':
-        print(f"Buffer size: {args.buffer_size} | Tau: {args.tau} | Alpha: {args.alpha}")
+        print(f"Buffer size: {args.buffer_size} | Tau: {args.tau} | Alpha: {args.alpha} | Start steps: {args.start_steps}")
     elif args.algorithm == 'TD3':
-        print(f"Buffer size: {args.buffer_size} | Tau: {args.tau}")
+        print(f"Buffer size: {args.buffer_size} | Tau: {args.tau} | Start steps: {args.start_steps}")
         print(f"Exploration Noise: {args.exploration_noise} | Policy Noise: {args.policy_noise} | Noise Clip: {args.noise_clip} | Policy Delay: {args.policy_delay}")
     else:  # PPO
         print(f"PPO Epochs: {args.ppo_epochs} | Epsilon Clip: {args.epsilon_clip}")
@@ -551,7 +561,8 @@ def main():
             device=args.device,
             use_cnn=use_cnn,
             input_channels=input_channels,
-            reward_scale=args.reward_scale
+            reward_scale=args.reward_scale,
+            start_steps=args.start_steps
         )
     elif args.algorithm == 'TD3':
         agent = TD3Agent(
@@ -568,6 +579,7 @@ def main():
             noise_clip=args.noise_clip,
             policy_delay=args.policy_delay,
             exploration_noise=args.exploration_noise,
+            start_steps=args.start_steps,
             use_cnn=use_cnn,
             input_channels=input_channels,
             reward_scale=args.reward_scale,
@@ -626,7 +638,8 @@ def main():
             max_steps=args.max_steps,
             log_interval=10,
             save_dir='models',
-            use_wandb=use_wandb
+            use_wandb=use_wandb,
+            start_steps=args.start_steps
         )
     
     # Test
