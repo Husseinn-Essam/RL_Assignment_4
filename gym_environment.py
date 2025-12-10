@@ -359,11 +359,8 @@ def main():
     np.random.seed(args.seed)
 
     # For dimension detection choose env wrappers consistent with chosen algorithm
-    temp_env = None
-    if args.env == 'CarRacing-v3':
-        temp_env = create_environment(args.env, algorithm=args.algorithm)
-    else:
-        temp_env = gym.make(args.env)
+    # Use create_environment for all envs to ensure consistency with training
+    temp_env = create_environment(args.env, algorithm=args.algorithm)
 
     use_cnn = len(temp_env.observation_space.shape) > 1
     if use_cnn:
