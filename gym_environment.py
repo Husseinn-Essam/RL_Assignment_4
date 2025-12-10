@@ -250,10 +250,10 @@ def train_agent(
                 })
 
         # Optionally save intermediate checkpoints
-        if (episode + 1) % (log_interval * 5) == 0:
-            ndir = os.path.join(save_dir, f"{run_name}_ep{episode+1}.pt")
-            agent.save(ndir)
-            print(f"Saved checkpoint: {ndir}")
+        # if (episode + 1) % (log_interval * 5) == 0:
+        #     ndir = os.path.join(save_dir, f"{run_name}_ep{episode+1}.pt")
+        #     agent.save(ndir)
+        #     print(f"Saved checkpoint: {ndir}")
 
     # Save final model
     model_path = os.path.join(save_dir, f"{run_name}.pt")
