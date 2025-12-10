@@ -60,30 +60,23 @@ class CarRacingPreprocessor(gym.ObservationWrapper):
 
 class CarRacingActionWrapper(gym.ActionWrapper):
     """
-    Rescale agent actions from [-1, 1] to the valid range for CarRacing-v3.
-    Agent outputs: [Steering, Gas, Brake] all in [-1, 1]
-    Environment expects:
-        Steering: [-1, 1]
-        Gas: [0, 1]
-        Brake: [0, 1]
+    Maps continuous actions to CarRacing-v3.
+    Uses a 'ReLU-like' mapping to make 0-gas and 0-brake easier to achieve.
     """
     def action(self, action):
-        # Steer: [-1, 1] -> [-1, 1] (No change)
+        # Steer: [-1, 1] -> [-1, 1]
         steer = action[0]
         
         # Gas: [-1, 1] -> [0, 1]
-        # Map -1 to 0, and 1 to 1 (init 0 -> 0.5)
-        # This helps exploration by forcing the car to move initially
-        gas = (action[1] + 1) / 2.0
+        # Treat any value < 0 as 0 gas. This creates a "dead zone" 
+        # that allows the agent to easily stop pressing gas.
+        gas = max(0.0, action[1])
         
         # Brake: [-1, 1] -> [0, 1]
-        # Map -1 to 0 (clip), and 1 to 1 (init 0 -> 0)
-        # This prevents the car from starting with brakes on
-        brake = np.clip(action[2], 0, 1)
+        # Treat any value < 0 as 0 brake.
+        brake = max(0.0, action[2])
         
         return np.array([steer, gas, brake])
-
-
 class FrameSkip(gym.Wrapper):
     """Skip frames to speed up training. Repeat action for n frames and return last observation."""
     
@@ -169,100 +162,79 @@ def train_agent(
     env_name,
     run_name,
     num_episodes=1000,
-    max_steps=500,
+    max_steps=1000,  # CarRacing typically needs 1000 steps
     log_interval=10,
     save_dir='models',
-    use_wandb=True
+    use_wandb=True,
+    start_steps=10000  # <--- NEW: Force random actions for first 10k steps
 ):
     """
-    Train the agent on the specified environment.
+    Train the agent with a 'Warmup' period to prevent early convergence to braking.
     """
     env = create_environment(env_name)
-    
-    # Create save directory
     os.makedirs(save_dir, exist_ok=True)
     
-    # Training metrics
     episode_rewards = []
     episode_losses = []
+    global_step_count = 0  # Track total steps across episodes
     
     for episode in range(num_episodes):
         state, _ = env.reset()
         episode_reward = 0
         episode_loss = []
         
-        # Print progress for first episode
-        if episode == 0:
-            print(f"Episode {episode + 1} started, collecting experiences...")
-        
         for step in range(max_steps):
-            # Select action
-            action = agent.select_action(state)
+            global_step_count += 1
             
-            # Take action
-            # Note: For CarRacing, the wrapper handles the conversion from [-1,1] to [0,1]
+            # --- MODIFIED ACTION SELECTION ---
+            if global_step_count < start_steps:
+                # WARMUP: Sample purely random action from [-1, 1]
+                # We don't use env.action_space.sample() because we want 
+                # to store the raw agent-range action [-1, 1] in the buffer.
+                action = np.random.uniform(-1, 1, size=agent.action_size)
+            else:
+                # TRAIN: Use Agent Policy
+                action = agent.select_action(state)
+            # ---------------------------------
+            
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
             
-            # Store transition - use 'terminated' NOT 'done' for the done flag
-            # This is critical: truncated episodes (time limit) should NOT be treated as terminal
             agent.store_transition(state, action, reward, next_state, terminated)
             
-            # Train SAC/TD3 every step for better sample efficiency
-            # For A2C and PPO, train() will be called at end of episode
-            if hasattr(agent, 'memory'):  # SAC/TD3 has replay buffer
+            # Start training only after we have enough data
+            if hasattr(agent, 'memory') and len(agent.memory) > start_steps:
                 loss = agent.train()
                 if loss is not None:
                     episode_loss.append(loss)
-                    # Print when training actually starts (buffer is full enough)
-                    if episode == 0 and len(episode_loss) == 1:
-                        print(f"Training started at step {step + 1} (replay buffer ready)")
             
             episode_reward += reward
             state = next_state
             
-            # Print step progress for first episode
-            if episode == 0 and (step + 1) % 50 == 0:
-                print(f"  Step {step + 1}/{max_steps}, reward so far: {episode_reward:.2f}")
-            
             if done:
                 break
         
-        # Train agent at end of episode (for A2C and PPO)
-        if not hasattr(agent, 'memory'):  # A2C and PPO don't have replay buffer
-            loss = agent.train()
-            if loss is not None:
-                episode_loss.append(loss)
-        
+        # Logging & Progress (Same as before)
         episode_rewards.append(episode_reward)
         avg_loss = np.mean(episode_loss) if episode_loss else 0
         episode_losses.append(avg_loss)
         
-        # Logging
         if (episode + 1) % log_interval == 0:
             avg_reward = np.mean(episode_rewards[-log_interval:])
-            avg_loss = np.mean(episode_losses[-log_interval:])
-            entropy_or_alpha = agent.get_entropy_coef()
-            
-            print(f"Episode {episode + 1}/{num_episodes} - "
-                  f"Avg Reward: {avg_reward:.2f}, "
-                  f"Avg Loss: {avg_loss:.4f}, "
-                  f"Entropy/Alpha: {entropy_or_alpha:.4f}")
+            print(f"Episode {episode + 1}/{num_episodes} (Step {global_step_count}) - "
+                  f"Avg Reward: {avg_reward:.2f}, Avg Loss: {avg_loss:.4f}")
             
             if use_wandb:
                 wandb.log({
                     'train/episode': episode + 1,
                     'train/reward': episode_reward,
-                    'train/avg_reward': avg_reward,
                     'train/loss': avg_loss,
-                    'train/entropy_coef': entropy_or_alpha
+                    'train/global_step': global_step_count
                 }, step=episode + 1)
-    
-    # Save final model with descriptive name
+                
+    # Save Final Model
     model_path = os.path.join(save_dir, f"{run_name}.pt")
     agent.save(model_path)
-    print(f"Model saved to {model_path}")
-    
     env.close()
     return agent
 

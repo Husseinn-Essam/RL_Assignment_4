@@ -147,7 +147,7 @@ class TD3Agent:
         
         self.total_it += 1
         
-        # Sample batch
+        # 1. SAMPLE BATCH
         if self.use_per:
             states, next_states, actions, rewards, dones, indices, weights = self.memory.sample(self.batch_size, beta=self.per_beta)
             states = states.to(self.device)
@@ -163,62 +163,74 @@ class TD3Agent:
             rewards = rewards.to(self.device)
             next_states = next_states.to(self.device)
             dones = dones.to(self.device)
-            weights = None
+            weights = 1.0 # Uniform weights if not using PER
         
         # Normalize image inputs
         if self.use_cnn:
             states = states.float() / 255.0
             next_states = next_states.float() / 255.0
         
-        # Ensure actions are 2D [batch, action_dim]
         if actions.dim() == 1:
             actions = actions.unsqueeze(-1)
         
-        # Update critics
+        # 2. CRITIC UPDATE
         with torch.no_grad():
-            # Target policy smoothing: add clipped noise to target actions
             next_mean, _ = self.actor_target(next_states)
             noise = torch.randn_like(next_mean) * self.policy_noise
             noise = torch.clamp(noise, -self.noise_clip, self.noise_clip)
             next_action = next_mean + noise
             next_action = torch.clamp(next_action, -1.0, 1.0)
             
-            # Compute target Q-values using clipped double Q-learning
             target_q1 = self.target_critic1(next_states, next_action).squeeze()
             target_q2 = self.target_critic2(next_states, next_action).squeeze()
             target_q = torch.min(target_q1, target_q2)
             target_q = rewards + (1 - dones) * self.gamma * target_q
         
-        # Current Q estimates
         current_q1 = self.critic1(states, actions).squeeze()
         current_q2 = self.critic2(states, actions).squeeze()
         
-        # Critic loss
-        critic1_loss = F.mse_loss(current_q1, target_q)
-        critic2_loss = F.mse_loss(current_q2, target_q)
+        # [FIX] Apply Importance Sampling Weights (PER)
+        # We use reduction='none' to get individual losses, multiply by weights, then mean
+        if self.use_per:
+            critic1_loss = (F.mse_loss(current_q1, target_q, reduction='none') * weights.squeeze()).mean()
+            critic2_loss = (F.mse_loss(current_q2, target_q, reduction='none') * weights.squeeze()).mean()
+        else:
+            critic1_loss = F.mse_loss(current_q1, target_q)
+            critic2_loss = F.mse_loss(current_q2, target_q)
         
         # Update critic 1
         self.critic1_optimizer.zero_grad()
         critic1_loss.backward()
+        # [FIX] Gradient Clipping
         torch.nn.utils.clip_grad_norm_(self.critic1.parameters(), 1.0)
         self.critic1_optimizer.step()
         
         # Update critic 2
         self.critic2_optimizer.zero_grad()
         critic2_loss.backward()
+        # [FIX] Gradient Clipping
         torch.nn.utils.clip_grad_norm_(self.critic2.parameters(), 1.0)
         self.critic2_optimizer.step()
+
+        # [FIX] Update Priorities in Buffer
+        if self.use_per:
+            # TD error is used as priority
+            td_error1 = torch.abs(current_q1 - target_q).detach().cpu().numpy()
+            td_error2 = torch.abs(current_q2 - target_q).detach().cpu().numpy()
+            # Use the mean or max of the two errors
+            new_priorities = (td_error1 + td_error2) / 2.0
+            self.memory.update_priorities(indices, new_priorities)
         
-        # Delayed policy updates
+        # 3. ACTOR UPDATE (Delayed)
         actor_loss = torch.tensor(0.0)
         if self.total_it % self.policy_delay == 0:
-            # Compute actor loss (maximize Q-value)
             mean, _ = self.actor(states)
             actor_loss = -self.critic1(states, mean).mean()
             
-            # Update actor
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
+            # [FIX] Clip actor gradients too
+            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 1.0)
             self.actor_optimizer.step()
             
             # Soft update target networks
