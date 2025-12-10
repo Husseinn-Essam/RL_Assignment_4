@@ -499,6 +499,9 @@ def main():
         if wandb_run is not None:
             # Update args with sweep parameters if using W&B sweeps
             config = wandb.config
+            # Use cpu if cuda not available
+            if config.device == 'cuda' and not torch.cuda.is_available():
+                config.device = 'cpu'
             for key in config.keys():
                 if hasattr(args, key.replace('-', '_')):
                     setattr(args, key.replace('-', '_'), config[key])
