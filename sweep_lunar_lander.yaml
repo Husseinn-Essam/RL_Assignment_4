@@ -1,0 +1,58 @@
+program: sweep_runner.py
+method: grid
+metric:
+  name: test_mean_reward
+  goal: maximize
+parameters:
+  env:
+    value: 'LunarLander-v3'
+  
+  # Algorithm selection - all three in one sweep
+  algorithm:
+    values: ['PPO', 'TD3', 'SAC']
+  
+  # Common parameters for all algorithms
+  # Note: actual episodes used will be: PPO=2000, TD3=1000, SAC=300
+  # This is controlled by sweep_runner.py
+  num_episodes:
+    value: 500
+  
+
+  num-tests:
+    value: 100
+  
+  learning-rate:
+    values: [0.0001, 0.0003, 0.001]
+  
+  gamma:
+    values: [0.99, 0.995]
+  
+  batch-size:
+    values: [128, 256]
+  
+
+  
+  # Off-policy parameters (TD3 and SAC only - ignored by PPO)
+  buffer-size:
+    values: [100000, 1000000]
+  
+  # PPO-specific parameters (ignored by TD3 and SAC)
+  ppo-epochs:
+    values: [5, 10]
+  
+  entropy-coef:
+    values: [0.001,0.01, 0.05]
+  
+  entropy-decay:
+    values: [0.5, 0.9]
+  
+  epsilon-clip:
+    values: [0.1, 0.2, 0.3]
+  
+  max-grad-norm:
+    values: [0.3, 0.5]
+  
+  gae-lambda: 
+    values: [0.95, 0.99]
+
+
