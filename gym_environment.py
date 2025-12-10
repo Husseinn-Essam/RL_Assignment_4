@@ -482,6 +482,13 @@ def main():
     
     args = parser.parse_args()
     
+    # Change device to cpu if cuda not available
+    if args.device == 'cuda' and not torch.cuda.is_available():
+        print("CUDA not available, switching to CPU")
+        args.device = 'cpu'
+    else:
+        print(f"Using device: {args.device}")
+    
     # Set random seeds
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -523,6 +530,9 @@ def main():
         if wandb_run is not None:
             # Update args with sweep parameters if using W&B sweeps
             config = wandb.config
+            # Use cpu if cuda not available
+            if config.device == 'cuda' and not torch.cuda.is_available():
+                config.device = 'cpu'
             for key in config.keys():
                 if hasattr(args, key.replace('-', '_')):
                     setattr(args, key.replace('-', '_'), config[key])
