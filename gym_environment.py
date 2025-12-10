@@ -157,27 +157,11 @@ def create_environment(env_name, render_mode=None, video_folder=None, episode_tr
 
 
 def get_action_space_info(env):
-    """Get information about the action space."""
-    if isinstance(env.action_space, gym.spaces.Discrete):
-        return env.action_space.n, True
-    else:
-        # For continuous action spaces
-        return env.action_space.shape[0], False
+    """Get action space dimension for continuous environments."""
+    return env.action_space.shape[0]
 
 
-def discretize_action(action, env, num_bins=10):
-    """Discretize continuous actions if needed."""
-    if isinstance(env.action_space, gym.spaces.Box):
-        # If action is already continuous (from continuous policy)
-        if isinstance(action, np.ndarray):
-            return np.clip(action, env.action_space.low, env.action_space.high)
-        # If action is discrete (shouldn't happen with continuous envs)
-        low = env.action_space.low[0]
-        high = env.action_space.high[0]
-        bin_size = (high - low) / num_bins
-        continuous_action = low + (action + 0.5) * bin_size
-        return np.array([continuous_action])
-    return action
+
 
 
 def train_agent(
@@ -450,6 +434,16 @@ def main():
     parser.add_argument('--exploration-noise', '--exploration_noise', type=float, default=0.1, dest='exploration_noise',
                         help='TD3 exploration noise std')
     
+    # PER parameters
+    parser.add_argument('--use-per', action='store_true', dest='use_per',
+                        help='Enable Prioritized Experience Replay (PER)')
+    parser.add_argument('--per-alpha', type=float, default=0.6, dest='per_alpha',
+                        help='PER alpha (how much prioritization is used, 0 = uniform)')
+    parser.add_argument('--per-eps', type=float, default=1e-6, dest='per_eps',
+                        help='PER epsilon to avoid zero priority')
+    parser.add_argument('--per-beta', type=float, default=0.4, dest='per_beta',
+                        help='Initial PER beta (importance-sampling correction)')
+    
     # Other settings
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
                         help='Device to use')
@@ -495,7 +489,7 @@ def main():
         state_size = temp_env.observation_space.shape[0]
         input_channels = 1
     
-    action_size, is_discrete = get_action_space_info(temp_env)
+    action_size = get_action_space_info(temp_env)
     temp_env.close()
     
     # Initialize W&B before constructing the agent so sweep configs can override args
@@ -533,7 +527,7 @@ def main():
                 state_size = temp_env.observation_space.shape[0]
                 input_channels = 1
             
-            action_size, is_discrete = get_action_space_info(temp_env)
+            action_size = get_action_space_info(temp_env)
             temp_env.close()
 
     # Calculate entropy decay episodes from fraction (clamp between 0 and 1)
@@ -542,23 +536,25 @@ def main():
 
     # Display final configuration after potential sweep overrides
     print(f"\nEnvironment: {args.env}")
-    print(f"State size: {state_size}")
-    print(f"Action size: {action_size}")
-    print(f"Action space: {'Discrete' if is_discrete else 'Continuous'}")
-    print(f"Using CNN: {use_cnn}")
-    if use_cnn:
-        print(f"Input channels: {input_channels}")
-    print(f"Algorithm: {args.algorithm}")
-    print(f"Device: {args.device}")
-    print(f"Learning Rate: {args.learning_rate}")
-    print(f"Gamma: {args.gamma}")
-    if args.algorithm == 'PPO':
-        print(f"Entropy Decay: {args.entropy_coef} → 0 over {entropy_decay_episodes} episodes ({entropy_decay*100:.0f}% of training)")
-        print(f"GAE Lambda: {args.gae_lambda}")
+    print(f"Algorithm: {args.algorithm} | Device: {args.device}")
+    print(f"State size: {state_size} | Action size: {action_size} | Action space: Continuous")
+    print(f"Using CNN: {use_cnn}" + (f" | Input channels: {input_channels}" if use_cnn else ""))
+    print(f"Episodes: {args.num_episodes} | Max steps: {args.max_steps} | Tests: {args.num_tests}")
+    print(f"Batch size: {args.batch_size} | Hidden sizes: {args.hidden_sizes} | Reward scale: {args.reward_scale}")
+    print(f"Learning Rate: {args.learning_rate} | Gamma: {args.gamma}")
+    print(f"Render: {args.render} | Record video: {args.record_video} | W&B: {not args.no_wandb}")
+    # PER summary
+    print(f"Prioritized Replay: {args.use_per} "
+          + (f"(alpha={args.per_alpha}, eps={args.per_eps}, beta={args.per_beta})" if args.use_per else ""))
+    if args.algorithm == 'SAC':
+        print(f"Buffer size: {args.buffer_size} | Tau: {args.tau} | Alpha: {args.alpha}")
     elif args.algorithm == 'TD3':
-        print(f"Exploration Noise: {args.exploration_noise}")
-        print(f"Policy Noise: {args.policy_noise}")
-        print(f"Policy Delay: {args.policy_delay}")
+        print(f"Buffer size: {args.buffer_size} | Tau: {args.tau}")
+        print(f"Exploration Noise: {args.exploration_noise} | Policy Noise: {args.policy_noise} | Noise Clip: {args.noise_clip} | Policy Delay: {args.policy_delay}")
+    else:  # PPO
+        print(f"PPO Epochs: {args.ppo_epochs} | Epsilon Clip: {args.epsilon_clip}")
+        print(f"GAE Lambda: {args.gae_lambda} | Entropy Coef: {args.entropy_coef} -> 0 over {entropy_decay_episodes} episodes ({entropy_decay*100:.0f}%)")
+        print(f"Max Grad Norm: {args.max_grad_norm} | Action Scale: {args.action_scale}")
     print()
 
     # Create agent after potential sweep overrides have been applied
@@ -574,7 +570,6 @@ def main():
             batch_size=args.batch_size,
             hidden_sizes=args.hidden_sizes,
             device=args.device,
-            discrete=is_discrete,
             use_cnn=use_cnn,
             input_channels=input_channels,
             reward_scale=args.reward_scale
@@ -596,7 +591,11 @@ def main():
             exploration_noise=args.exploration_noise,
             use_cnn=use_cnn,
             input_channels=input_channels,
-            reward_scale=args.reward_scale
+            reward_scale=args.reward_scale,
+            use_per=args.use_per,
+            per_alpha=args.per_alpha,
+            per_eps=args.per_eps,
+            per_beta=args.per_beta
         )
     else:  # PPO
         agent = PPOAgent(
@@ -610,7 +609,6 @@ def main():
             batch_size=args.batch_size,
             hidden_sizes=args.hidden_sizes,
             device=args.device,
-            discrete=is_discrete,
             entropy_coef=args.entropy_coef,
             entropy_decay_episodes=entropy_decay_episodes,
             max_grad_norm=args.max_grad_norm,
