@@ -43,7 +43,6 @@ def main():
     
     # Update the run name
     wandb.run.name = run_name
-    wandb.run.save()
     
     print(f"Running {algorithm} with {num_episodes} episodes (algorithm-specific override)")
     print(f"Run name: {run_name}")
